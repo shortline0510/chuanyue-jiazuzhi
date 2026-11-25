@@ -4349,6 +4349,11 @@ const CLAN_ASSESS_BONUS = 6;         // 宗族官員考核加分（皇親出身�
 const CLAN_PICK_RANK = 5;            // 官至此階（正六品府通判）以上的宗族官員，可在人物詳情「拔擢入朝」，也會列入罷免大臣時的接任人選
 const CLAN_ARMY_RANK = 4;            // 宗族武官官至此階以上，可被拔擢為大都督／兵部尚書
 const ABDICATE_TIANMING = -3;        // 讓賢給旁支時的天命變化（正統性受質疑）
+const HEIR_AGE_PENALTY = 2.5;        // 挑選過繼／迎立人選時，35 歲以上每多一歲扣的分數（避免立個老人，登基沒幾年又絕嗣）
+const EMP_HAREM_MAX_AGE = 70;        // 皇帝幾歲以下仍會奏請大婚
+const EMP_OLD_BIRTH = 0.5;           // 皇帝 65 歲以上時的生育係數
+const CLAN_MIN_YOUNG = 4;            // 宗族中 14～35 歲的血親少於此數時，遠支宗親會陸續入京認祖歸宗
+const CLAN_KIN_JOIN_RATE = 0.6;      // 每年有遠支宗親入京的機率
 FACTIONS.zongqin = { name:'宗親', color:'#2f6fc0', desc:'出身宗室的官員，與皇室血脈相連，忠誠較高但會壯大宗室' };
 
 EMP_EVENTS.push(
@@ -5665,7 +5670,7 @@ function enterEmperor(o) {
     treasury:0, merchantWan:Math.round(MERCHANT_BASE + MERCHANT_LOG * Math.log10(1 + shops * 12 / 1e4 / eraMul() * 10)),
     ministers:[], consorts:[], branches:[], zongshi:{ count:0, nobles:[], titles:[], summary:'' },
     policies:[], policiesDone:[], mods:{ tax:0, famine:1, plague:1, flood:1, lizhiCap:0, armyCost:0, honesty:0, pirates:0, bingli:0 },
-    crises:{}, memos:[], sched:[], evTimer:3, record:newRecord(), emperors:[], log:[], flags:{}, budget:null, yearSpend:0, ap:EMP_AP, edict:null, ffTo:0, thr:{} };
+    crises:{}, memos:[], sched:[], evTimer:3, clanSettled:true, record:newRecord(), emperors:[], log:[], flags:{}, budget:null, yearSpend:0, ap:EMP_AP, edict:null, ffTo:0, thr:{} };
   const E = G.emp;
   E.treasury = empWan(T.treasury + Math.min(ACC_TREASURY_CAP, silverWan * ACC_TREASURY_RATE));
   E.nat.tianming = Math.round(clamp(30 + Math.min(G.fame, 4000) / 100 + T.tianmingAdj, 10, 90));
@@ -5762,7 +5767,7 @@ function empBirths() {
   const bearOK = (a, b) => { const mo = a.gender === 'f' ? a : b; const wa = ageOf(mo); if (wa < 16 || wa > 45) return 0; if (mo.lastBear && now - mo.lastBear < 12) return 0; return wa <= 30 ? 1 : (46 - wa) / 16; };
   if (empKids(true).length < EMP_CHILD_CAP) for (const c of consorts()) {
     const f = bearOK(emp, c); if (!f) continue;
-    const ch = EMP_BIRTH_RATE * (c.consort.favor / 50) * f * (ageOf(emp) > 65 ? 0.3 : 1);
+    const ch = EMP_BIRTH_RATE * (c.consort.favor / 50) * f * (ageOf(emp) > 65 ? EMP_OLD_BIRTH : 1);
     if (Math.random() < ch) {
       const kid = bear(emp, c, true); (emp.gender === 'f' ? emp : c).lastBear = now;
       G.emp.lastBirth = { at:now, motherId:c.id, kid:kid.id };
@@ -6349,7 +6354,7 @@ function branchSuccessor(b) {
   return c;
 }
 function adoptFromZongshi() {
-  const best = clanTop(1, 8)[0];
+  const best = clanHeirs(1)[0];
   if (best) { bringToCapital(best); plog(best, `${G.year}年 自宗室過繼入嗣`); return best; }
   const nb = G.emp.zongshi.nobles[0];
   const p = nb && nb.pid && P(nb.pid) && settleOut(P(nb.pid)) ? P(nb.pid) : makePerson({ name:nb ? nb.name : G.surname + randomGiven('m'), gender:'m', by:G.year - randi(10, 25), stats:randStats(48, 15), apt:1, gen:head() ? head().gen + 1 : 2, tag:'宗室子弟' });
@@ -6391,10 +6396,13 @@ function syncZong() { const z = G.emp.zongshi; z.extra = Math.max(0, Math.round(
 const clanJobName = p => p.job ? (p.job === 'official' ? offName(p.rank) : JOB_LINES[p.job].ranks[p.rank]) : (p.lastJob ? '致仕' : '');
 // 才德分數：用來挑選讓賢人選、宗室賢才
 const clanScore = p => Math.round((eff(p, 'int') + eff(p, 'eq')) * 0.4 + eff(p, 'str') * 0.2 + (p.job === 'official' ? p.rank * 2 : p.job && isTop(p) ? 10 : 0));
+// 繼位人選分數：才德為主，但年紀越大越扣分（35 歲以上），10 歲以下不考慮
+const heirScore = p => { const a = ageOf(p); return clanScore(p) - Math.max(0, a - 35) * HEIR_AGE_PENALTY - (a < 16 ? 12 : 0); };
+function clanHeirs(n) { return clanAlive().filter(p => p.blood && ageOf(p) >= 10 && ageOf(p) <= 60).sort((a, b) => heirScore(b) - heirScore(a)).slice(0, n); }
 function clanTop(n, minAge = 18) { return clanAlive().filter(p => p.blood && ageOf(p) >= minAge && ageOf(p) <= 65).sort((a, b) => clanScore(b) - clanScore(a)).slice(0, n); }
 // 依父母（一方）的行業決定出路：父母任官或讀書 → 讀書考科舉；否則多半承襲家業
 function inheritJob(p) {
-  const pj = [p.fatherId, p.motherId].map(P).filter(Boolean).map(x => x.job || x.lastJob).filter(Boolean);
+  const pj = [p.fatherId, p.motherId].map(P).filter(Boolean).map(x => x.job || x.lastJob || (x.degree >= EXAMS.length || /進士|狀元|榜眼|探花/.test(x.title || '') ? 'official' : null)).filter(Boolean);
   if (pj.some(j => j === 'official' || j === 'student')) return 'student';
   if (pj.length && Math.random() < CLAN_INHERIT_RATE) return pick(pj);
   if (!pj.length && Math.random() < CLAN_NOJOB_STUDY) return 'student';
@@ -6479,12 +6487,27 @@ function clanYear() {
     // 官至高位：吏部奏請拔擢入朝
     if (!p.recommended && !E.ministers.some(m => m.pid === p.id) && ((p.job === 'official' && p.rank >= CLAN_MINISTER_RANK) || (p.job === 'army' && p.rank >= CLAN_ARMY_RANK))) { p.recommended = true; recs.push(p); }
   }
+  // 宗族年輕一輩太少時，遠支宗親入京認祖歸宗，讓宗族不會斷代
+  const young = clanAlive().filter(p => p.blood && ageOf(p) >= 14 && ageOf(p) <= 35).length;
+  if (young < CLAN_MIN_YOUNG && simN < CLAN_SIM_CAP && Math.random() < CLAN_KIN_JOIN_RATE) {
+    const g = Math.random() < 0.55 ? 'm' : 'f', emp = head();
+    const k = makePerson({ name:G.surname + randomGiven(g), gender:g, by:G.year - randi(16, 24), stats:randStats(46, 12), apt:randi(1, 3), gen:emp ? emp.gen : 1, tag:'遠支宗親' });
+    k.out = 'zongshi'; k.ztitle = '宗室'; k.talent = pick(ZHUAZHOU_ITEMS).id; k.edu = 'school';
+    if (E.zongshi.extra > 0) E.zongshi.extra--;
+    plog(k, `${G.year}年 自原籍入京，認祖歸宗`);
+    empLog(`遠支宗親${k.name}入京認祖歸宗`);
+  }
   for (const p of recs.slice(0, 1)) enqueue({ type:'eev', dyn:clanRecommendEvent(p), actor:{ kind:'person', ref:p.id } });
   for (const p of recs.slice(1)) p.recommended = false;   // 一年只奏一位，其餘明年再議
   // 具名宗親：由真實族人中選出最有本事、最有野心的三位
   E.zongshi.nobles = clanAlive().filter(p => p.blood && p.gender === 'm' && ageOf(p) >= 18).map(p => ({ pid:p.id, name:p.name, title:p.ztitle || '宗室', ability:clanScore(p), ambition:p.amb ?? 40 }))
     .sort((a, b) => (b.ability + b.ambition) - (a.ability + a.ambition)).slice(0, ZONGSHI_NOBLES_MAX);
   syncZong();
+}
+function settleFrozenClan() {
+  if (!isEmp() || G.emp.clanSettled) return;
+  for (const p of Object.values(G.people)) if (p.alive && p.out && p.out !== 'wed' && p.out !== 'heqin' && ageOf(p) >= p.life) { p.alive = false; p.dy = p.by + p.life; p.deathCause = '壽終正寢'; }
+  G.emp.clanSettled = true; LIVE = null; syncZong();
 }
 // 宗族官員入朝：轉成大臣
 function clanMinister(p, office) {
@@ -6526,7 +6549,7 @@ function enfeoffClan(p) {
 function fertileConsorts() { const e = head(); return consorts().filter(c => { const mo = e.gender === 'f' ? e : c; const a = ageOf(mo); return a >= 15 && a <= 40; }); }
 function ensureHarem(why) {
   const e = head(); if (!e || !e.alive) return [];
-  const a = ageOf(e); if (a < 15 || a > 65 || (e.gender === 'f' && a > 40)) return [];
+  const a = ageOf(e); if (a < 15 || a > EMP_HAREM_MAX_AGE || (e.gender === 'f' && a > 42)) return [];
   const added = [];
   while (fertileConsorts().length < EMP_MIN_CONSORTS && consorts().length < CONSORT_MAX && added.length < EMP_MIN_CONSORTS) {
     const c = xuanxiuCandidates().sort((x, y) => y.clanPower - x.clanPower)[0];
@@ -7353,6 +7376,7 @@ function migrateSave() {
 function startGame(fresh) {
   migrateSave();
   migrateEmperorSave();   // 舊版帝王模式存檔：重新跑一次登基收束
+  settleFrozenClan();     // 舊存檔：補上宗親在「不模擬期間」的生老病死
   if (isEmp()) for (const id in G.emp.crises) G.emp.crises[id].queued = false;
   LIVE = null; buildNav(); switchView(isEmp() ? 'court' : 'family');
   VIEW = { x:20, y:20, z:0.8 }; renderTree(); locateHead(); updateHUD();
@@ -7732,7 +7756,7 @@ function esuccModal(it) {
     if (sons.length >= 2) return h + `<div class="sec" style="color:var(--down)">奪嫡</div><div class="wbox">先帝未立儲君！諸皇子各擁黨羽，宮中劍拔弩張。群臣請皇后與顧命大臣議定新君——但無論選誰，有野心的兄弟都可能起兵。</div><div class="list">` +
       sons.map(p => { const bk = p.backer && minById(p.backer); return liPerson(p, `<div class="muted" style="font-size:11px;text-align:right">野心 ${p.amb || 0}${bk ? '<br>' + bk.name + '支持' : ''}</div><button class="btn sm" onclick="${cb(() => { const r = resolveContest(p, it.pid); go(r.winner, r.winner === p ? '經廷議擁立' : '奪嫡自立', r.text); })}">擁立</button>`); }).join('') + '</div>';
     // 5. 其他在京血親（含幼主）
-    const clanPick = clanTop(3).map(p => liPerson(p, `<div class="muted" style="font-size:11px;text-align:right">才德 ${clanScore(p)}<br>${clanJobName(p)}</div><button class="btn sm org" onclick="${cb(() => { bringToCapital(p); applyNat({ tianming:ABDICATE_TIANMING, zongshi:5 }); go(p, '以宗室賢能入繼大統'); })}">迎立</button>`)).join('');
+    const clanPick = clanHeirs(3).map(p => liPerson(p, `<div class="muted" style="font-size:11px;text-align:right">${ageOf(p)}歲・才德 ${clanScore(p)}<br>${clanJobName(p)}</div><button class="btn sm org" onclick="${cb(() => { bringToCapital(p); applyNat({ tianming:ABDICATE_TIANMING, zongshi:5 }); go(p, '以宗室賢能入繼大統'); })}">迎立</button>`)).join('');
     if (cands.length) return h + `<div class="sec">擇立新君</div><div class="list">` + cands.slice(0, 8).map(p => liPerson(p, `<button class="btn sm" onclick="${cb(() => go(p, ageOf(p) < 16 ? '以幼主即位，大臣輔政' : old && old.children.includes(p.id) ? (p.gender === 'm' ? '以皇子即位' : '以公主之身即位') : '入繼大統'))}">擁立</button>`)).join('') + '</div>' + (clanPick ? `<div class="sec">或迎立宗室賢能（天命 ${ABDICATE_TIANMING}）</div><div class="list">${clanPick}</div>` : '');
     // 6. 迎立藩王／過繼宗室
     if (clanPick) return h + `<div class="sec" style="color:var(--down)">大宗無嗣</div><div class="wbox">京中已無皇室血脈！群臣議論：從宗室中迎立一位賢能，或迎立藩王。</div><div class="list">${clanPick}</div>` + E.branches.map(b => `<button class="opt" onclick="${cb(() => go(branchSuccessor(b), `以${b.title}迎立入繼`))}">迎立${b.title}<span class="reqt">一脈 ${b.count} 人・勢力 ${b.power}・忠誠 ${b.loyalty}</span></button>`).join('');
@@ -7877,12 +7901,12 @@ function empPersonButtons(p, m) {
 function abdicateModal() {
   const E = G.emp, emp = head();
   const kids = empKids().filter(k => ageOf(k) >= 16).sort((a, b) => (b.id === G.heirId) - (a.id === G.heirId) || ageOf(b) - ageOf(a));
-  const clan = clanTop(5);
+  const clan = clanHeirs(5);
   openModal({ kind:'sc', title:'禪位讓賢', render:m => {
     const row = (p, tag) => liPerson(p, `<div class="muted" style="font-size:11px;text-align:right">${tag}</div><button class="btn sm org" onclick="${cb(() => { if (!confirm(`確定禪位給${p.name}？陛下將退居太上皇，本朝就此結束。`)) return; closeAll(); endReign('abdicated', null, p.id); })}">禪位</button>`);
     return `<div class="wbox">${emp.name}在位 ${reignYears()} 年。禪位後本朝結算廟號與史評，新君即位改元。<br><span class="muted">傳給旁支宗親叫做「讓賢」，百姓稱頌，但天命 ${ABDICATE_TIANMING}；原本的皇子們會被分封出京。</span></div>
       <div class="sec">皇子女</div><div class="list">${kids.map(p => row(p, p.id === G.heirId ? '太子' : '皇' + (p.gender === 'm' ? '子' : '女'))).join('') || '<div class="muted">沒有成年的皇子女。</div>'}</div>
-      <div class="sec">宗族賢能</div><div class="list">${clan.map(p => row(p, `才德 ${clanScore(p)}<br>${clanJobName(p)}`)).join('') || '<div class="muted">宗族中沒有合適人選。</div>'}</div>`;
+      <div class="sec">宗族賢能</div><div class="list">${clan.map(p => row(p, `${ageOf(p)}歲・才德 ${clanScore(p)}<br>${clanJobName(p)}`)).join('') || '<div class="muted">宗族中沒有合適人選。</div>'}</div>`;
   } });
 }
 // 拔擢宗族官員入朝：選擇要接替的官職
