@@ -4450,21 +4450,44 @@ function avatarSVG(p, cls) {
   else if (line === 'farm') cloth = '#7a9a4a';
   s += `<path d="M14 100 Q16 72 50 69 Q84 72 86 100Z" fill="${cloth}" ${SW}/>`;
   s += `<path d="M40 71 L50 84 L60 71" fill="#fff" ${SW}/>`;
+  const hatted = age >= 16 && (line === 'official' || line === 'martial' || line === 'clinic' || line === 'army' || line === 'emperor');
   if (f) {
-    s += `<path d="M24 50 Q22 78 34 80 L66 80 Q78 78 76 50Z" fill="${hair}" ${SW}/>`;
-    if (age >= 16 && line !== 'official' && line !== 'martial' && line !== 'army' && line !== 'emperor') s += `<circle cx="50" cy="17" r="12" fill="${hair}" ${SW}/><path d="M34 14 L68 22" stroke="#e8b84a" stroke-width="3.5" stroke-linecap="round"/><circle cx="68" cy="22" r="3.5" fill="#d9432f" ${SW}/>`;
+    // 交領衣襟：淡色內襟＋腰帶
+    s += `<path d="M38 71 L50 88 L62 71" fill="#fff6f0" ${SW2}/><path d="M18 92 Q50 86 82 92" fill="none" stroke="#fff0c0" stroke-width="4"/>`;
+    // 髮髻（成年女子、沒戴官帽時）：髮髻、金簪、小花
+    if (age >= 16 && !hatted) s += `<ellipse cx="50" cy="17" rx="13" ry="10" fill="${hair}" ${SW}/>` +
+      (elder ? `<path d="M36 17 L66 13" stroke="#c9a23a" stroke-width="3" stroke-linecap="round"/>` :
+       `<path d="M33 21 L69 11" stroke="#e8b84a" stroke-width="3" stroke-linecap="round"/><circle cx="69" cy="11" r="2.6" fill="#e8b84a" ${SW2}/>` +
+       [[0, -3.4], [3.2, -1], [2, 2.8], [-2, 2.8], [-3.2, -1]].map(([dx, dy]) => `<circle cx="${36 + dx}" cy="${14 + dy}" r="2.6" fill="#ff8fb1"/>`).join('') + `<circle cx="36" cy="14" r="1.6" fill="#ffe27a"/>`);
   }
   s += `<circle cx="50" cy="46" r="24" fill="${skin}" ${SW}/>`;
-  if (f) s += `<path d="M26 44 Q28 20 50 20 Q72 20 74 44 Q64 30 50 32 Q36 30 26 44Z" fill="${hair}" ${SW}/>`;
+  if (f) {
+    // 兩側垂髮落在肩上（長大才有；長者盤髮、沒有垂髮）
+    if (age >= 10 && !elder) s += `<path d="M27 40 Q19 62 23 84 Q29 88 34 82 Q29 64 33 50Z" fill="${hair}" ${SW}/><path d="M73 40 Q81 62 77 84 Q71 88 66 82 Q71 64 67 50Z" fill="${hair}" ${SW}/>`;
+    // 斜瀏海
+    s += `<path d="M26 46 Q25 21 50 20 Q75 21 74 46 Q71 33 61 30 Q57 37 47 36 Q40 31 34 34 Q28 38 26 46Z" fill="${hair}" ${SW}/>`;
+  }
   else s += `<path d="M27 42 Q28 21 50 21 Q72 21 73 42 Q66 32 56 34 L50 28 L44 34 Q34 32 27 42Z" fill="${hair}" ${SW}/>`;
   if (age < 16) s += `<circle cx="32" cy="24" r="8" fill="${hair}" ${SW}/><circle cx="68" cy="24" r="8" fill="${hair}" ${SW}/>`;
-  else if (!f || line === 'official' || line === 'martial' || line === 'clinic' || line === 'army' || line === 'emperor') s += hatSVG(line);
-  s += face(50, 48, 1);
+  else if (!f || hatted) s += hatSVG(line);
+  s += f ? faceF(50, 48, age < 16) : face(50, 48, 1);
   if (elder) {
     if (!f) s += `<path d="M38 60 Q50 84 62 60 Q56 66 50 64 Q44 66 38 60Z" fill="${hair}" ${SW}/>`;
-    s += `<path d="M34 40 L40 42 M66 40 L60 42" stroke="#b08a70" stroke-width="2"/>`;
+    s += f ? `<path d="M33 52 Q35 55 33 58 M67 52 Q65 55 67 58" fill="none" stroke="#d9a88a" stroke-width="1.6"/>` : `<path d="M34 40 L40 42 M66 40 L60 42" stroke="#b08a70" stroke-width="2"/>`;
   }
   return s + `</svg>`;
+}
+function faceF(cx, cy, child) {
+  const e = 8.5;
+  let s = `<path d="M${cx - e - 4} ${cy - 7} Q${cx - e} ${cy - 9} ${cx - e + 4} ${cy - 7.5} M${cx + e - 4} ${cy - 7.5} Q${cx + e} ${cy - 9} ${cx + e + 4} ${cy - 7}" fill="none" stroke="#5a4032" stroke-width="1.4" stroke-linecap="round"/>`;
+  for (const d of [-1, 1]) {
+    const x = cx + d * e;
+    s += `<ellipse cx="${x}" cy="${cy}" rx="2.9" ry="3.5" fill="${INK}"/><circle cx="${x + 1}" cy="${cy - 1.3}" r="1.1" fill="#fff"/>`;
+    if (!child) s += `<path d="M${x + d * 2.6} ${cy - 2.4} L${x + d * 4.8} ${cy - 4.2}" stroke="${INK}" stroke-width="1.4" stroke-linecap="round"/>`;
+    s += `<ellipse cx="${x + d * 3.5}" cy="${cy + 6.5}" rx="4.2" ry="2.4" fill="#ff9eb4" opacity=".65"/>`;
+  }
+  s += `<path d="M${cx - 3.2} ${cy + 8.2} Q${cx} ${cy + 11} ${cx + 3.2} ${cy + 8.2}" fill="#e2566f" stroke="#c2405a" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+  return s;
 }
 function face(cx, cy, k) {
   const e = 9 * k;
