@@ -3499,7 +3499,7 @@ const MERCHANT_CAP_RATE = 0.4;       // 皇商收入上限：稅收的 40%
 const EMP_TAX_BASE = 900;            // 稅收 = 基數 ×(0.5+民心/100)×(0.7+吏治/200)×(1+稅收加成，上限 EMP_TAX_MOD_CAP)
 const EMP_ARMY_COST = 4.5;           // 軍餉 = 兵力 × 此值
 const EMP_COURT_BASE = 120;          // 宮廷開銷 = 基數 ×(1 + 0.08 ×(后妃數 + 皇子女數))
-const EMP_ZONGSHI_COST = 2.5;        // 宗室俸祿 = 此值 ×（宗室人數 + 各藩人數）^0.85 ×(1 + 俸祿調整)
+const EMP_ZONGSHI_COST = 3.5;        // 宗室俸祿 = 此值 ×（宗室人數 + 各藩人數）^0.85 ×(1 + 俸祿調整)；宗族越興旺，國庫負擔越重
 const ZONGSHI_GROWTH = 0.025;        // 宗室與各藩每年人口成長率（越接近 ZONGSHI_CAP 越慢）
 const ZONGSHI_CAP = 2000;
 const EMP_OFFICIAL_COST = 18;        // 百官俸祿 = 每位重臣此值（含其下屬）
@@ -4334,10 +4334,12 @@ ACHIEVEMENTS.push(
  * --------------------------------------------------------------------- */
 const EMP_MIN_CONSORTS = 2;          // 皇帝身邊至少要有幾位可生育的后妃；不足時宗人府會奏請大婚（自動冊立）
 const EMP_NOHEIR_XUANXIU = 4;        // 在位滿幾年仍無子嗣，宗人府奏請選秀
-const CLAN_SIM_CAP = 90;             // 宗族逐人模擬的人數上限；超過後新生兒只記入宗室總數
-const CLAN_MARRY_RATE = 0.3;         // 18～30 歲未婚族人，每年成親的機率
-const CLAN_BIRTH_RATE = 0.22;        // 已婚夫妻（妻 16～42 歲）每年生子的機率
-const CLAN_MAX_KIDS = 4;
+const CLAN_SIM_CAP = 360;            // 宗族人口的「擁擠上限」：越接近此數，第三胎以後越少（頭兩胎不受影響；新生兒一律出現在族譜上）
+const CLAN_CROWD_MIN = 0.02;         // 擁擠時生育機率的最低倍率
+const CLAN_MARRY_RATE = 0.45;        // 17～35 歲未婚族人，每年成親的機率（古人早婚，多半 20 歲前後成家）；女兒出嫁後離開宗族，兒子娶妻生子
+const CLAN_BIRTH_RATE = 0.3;         // 已婚夫妻（妻 16～42 歲）每年生子的機率
+const CLAN_FIRST_BIRTH = 0.55;       // 還沒有孩子、妻子 30 歲以下時，每年生第一胎的機率
+const CLAN_MAX_KIDS = 5;
 const CLAN_INHERIT_RATE = 0.7;       // 父母有一方從事某行業時，孩子承襲該行業的機率（父母任官則一律讀書考科舉）
 const CLAN_RETIRE_AGE = 65;          // 族人致仕／退休的年齡
 const CLAN_JOBS = ['farm', 'merchant', 'army', 'academy', 'clinic', 'bank', 'martial', 'student'];   // 無家學可承時的隨機出路
@@ -6452,7 +6454,9 @@ function clanYear() {
       plog(p, `${G.year}年 ${j === 'student' ? '承家學，閉門讀書準備科舉' : '進入' + JOB_LINES[j].place + '當' + JOB_LINES[j].ranks[0]}`);
     }
     // 婚嫁與生育
-    if (p.blood && a >= 18 && a <= 30 && !p.spouseId && Math.random() < CLAN_MARRY_RATE) {
+    if (p.blood && a >= 17 && a <= 35 && !p.spouseId && Math.random() < CLAN_MARRY_RATE) {
+      // 女兒出嫁：嫁到別家，從此不算宗族（子女隨夫家）；兒子娶妻，妻兒入宗族
+      if (p.gender === 'f') { p.out = 'wed'; p.ztitle = '已出嫁'; plog(p, `${G.year}年 出嫁`); simN--; continue; }
       const g = p.gender === 'm' ? 'f' : 'm';
       const s = makePerson({ name:randomFullName(g, G.surname), gender:g, by:G.year - randi(Math.max(16, a - 5), a + 2), stats:randStats(45, 12), blood:false, gen:p.gen, apt:1 });
       s.out = 'zongshi'; s.ztitle = g === 'f' ? '宗婦' : '儀賓'; s.talent = 'coin'; s.liye = true;
@@ -6461,7 +6465,9 @@ function clanYear() {
     const sp = spouseOf(p);
     if (p.blood && sp && sp.alive && p.children.length < CLAN_MAX_KIDS) {
       const wife = p.gender === 'f' ? p : sp, wa = ageOf(wife);
-      if (wa >= 16 && wa <= 42 && Math.random() < CLAN_BIRTH_RATE) { if (simN < CLAN_SIM_CAP) { clanBear(p.gender === 'm' ? p : sp, wife); simN++; } else E.zongshi.extra++; }
+      const crowd = Math.max(CLAN_CROWD_MIN, 1 - Math.pow(simN / CLAN_SIM_CAP, 2));
+      const nk = p.children.length, rate = nk === 0 ? (wa <= 30 ? CLAN_FIRST_BIRTH : CLAN_BIRTH_RATE) : nk === 1 ? CLAN_BIRTH_RATE : CLAN_BIRTH_RATE * crowd;   // 頭兩胎不受擁擠影響
+      if (wa >= 16 && wa <= 42 && Math.random() < rate) { clanBear(p.gender === 'm' ? p : sp, wife); simN++; }
     }
     // 行業：熟練度、升遷、科舉、考核、退休
     if (p.job && p.job !== 'student') {
@@ -6485,7 +6491,7 @@ function clanYear() {
     if (a >= CLAN_RETIRE_AGE && p.job && !E.ministers.some(m => m.pid === p.id)) { p.lastJob = p.job; plog(p, `${G.year}年 致仕還家`); p.job = null; }
     if (p.blood && a >= 18 && p.amb === undefined) p.amb = randi(15, 75);
     // 官至高位：吏部奏請拔擢入朝
-    if (!p.recommended && !E.ministers.some(m => m.pid === p.id) && ((p.job === 'official' && p.rank >= CLAN_MINISTER_RANK) || (p.job === 'army' && p.rank >= CLAN_ARMY_RANK))) { p.recommended = true; recs.push(p); }
+    if (p.blood && !p.recommended && !E.ministers.some(m => m.pid === p.id) && ((p.job === 'official' && p.rank >= CLAN_MINISTER_RANK) || (p.job === 'army' && p.rank >= CLAN_ARMY_RANK))) { p.recommended = true; recs.push(p); }
   }
   // 宗族年輕一輩太少時，遠支宗親入京認祖歸宗，讓宗族不會斷代
   const young = clanAlive().filter(p => p.blood && ageOf(p) >= 14 && ageOf(p) <= 35).length;
@@ -7087,8 +7093,38 @@ function settingsModal() {
       <div class="box row" style="justify-content:space-between"><div><b>自動處理小事件</b><div class="muted">沒有花費和門檻的一般事件自動選擇；科舉、婚姻、生病、家主過世、改朝換代仍會暫停</div></div><button class="toggle ${G.autoSmall ? 'on' : ''}" onclick="${cb(() => { G.autoSmall = !G.autoSmall; renderModal(m); save(); })}"></button></div>
       <div class="sec">成就（${Object.keys(G.achievements).length}/${ACHIEVEMENTS.length}）</div><div class="list">${ACHIEVEMENTS.map(a => { const d = G.achievements[a.id]; return `<div class="li" style="cursor:default;${d ? '' : 'opacity:.55'}"><div style="font-size:20px">${d ? '🏆' : '🔒'}</div><div class="grow"><b>${a.name}</b><div class="muted">${a.desc}${d ? `（${d.y}年達成）` : ''}</div></div></div>`; }).join('')}</div>
       <div class="sec">家族大事記</div><div class="resume">${G.chronicle.slice(0, 40).map(l => `<div>${l.y}年 ${l.t}</div>`).join('')}</div>
-      <div class="row" style="align-items:flex-end"><button class="btn sm mint" style="flex:none" onclick="${cb(() => { m.redeem = true; renderModal(m); })}">兌換碼</button><button class="btn sm mint" style="flex:none" onclick="${cb(() => keyHelpModal())}">⌨ 快捷鍵</button><button class="btn lime" onclick="${cb(() => closeModal(m))}">返回遊戲</button></div>`;
+      <div class="row" style="align-items:flex-end"><button class="btn sm mint" style="flex:none" onclick="${cb(() => { m.redeem = true; renderModal(m); })}">兌換碼</button><button class="btn sm mint" style="flex:none" onclick="${cb(() => keyHelpModal())}">⌨ 快捷鍵</button></div>
+      <div class="row"><button class="btn sm" onclick="${cb(() => exportSave())}">匯出存檔</button><button class="btn sm org" onclick="${cb(() => importSave())}">匯入存檔</button></div>
+      <div class="muted center">匯出會下載一個存檔檔案；匯入可以讀取存檔檔案（.json 或 .txt），會覆蓋目前進度。</div><div class="row" style="align-items:flex-end"><button class="btn lime" onclick="${cb(() => closeModal(m))}">返回遊戲</button></div>`;
   } });
+}
+/* ---------- 匯出／匯入存檔 ---------- */
+function exportSave() {
+  save();
+  const blob = new Blob([localStorage.getItem(SAVE_KEY) || JSON.stringify(G)], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = `穿越家族志存檔_${G.surname}氏_${G.year}年.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  centerTip('存檔已匯出');
+}
+function importSave() {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.json,.txt,application/json,text/plain';
+  inp.onchange = () => {
+    const f = inp.files[0]; if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      let s; try { s = JSON.parse(String(rd.result).trim()); } catch (e) { s = null; }
+      if (!s || s.ver !== 2 || !s.people) { centerTip('這不是有效的存檔檔案'); return; }
+      if (!confirm('匯入後會覆蓋目前的進度，確定要匯入嗎？')) return;
+      G = null; LIVE = null; Q.length = 0;
+      localStorage.setItem(SAVE_KEY, JSON.stringify(s));
+      location.reload();
+    };
+    rd.readAsText(f, 'utf-8');
+  };
+  inp.click();
 }
 function doRedeem() {
   const code = ($('rcode').value || '').trim().toUpperCase(), r = REDEEM_CODES[code];
